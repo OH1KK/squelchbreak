@@ -346,7 +346,21 @@ class AudioEngine:
             result = subprocess.run([script], capture_output=True, text=True, timeout=5)
             raw = result.stdout.strip()
             if raw:
-                return json.loads(raw)
+                data = json.loads(raw)
+                self.ui.on_log(f"Metadata: {json.dumps(data)}", "dim")
+                if "frequency" in data:
+                    try:
+                        freq_mhz = float(data["frequency"]) / 1_000_000
+                        mode = data.get("mode", "")
+                        suffix = f" {mode}" if mode else ""
+                        self.ui.on_log(f"📻 {freq_mhz:.4f} MHz{suffix}", "green")
+                    except (TypeError, ValueError):
+                        self.ui.on_log(
+                            f"📻 frequency: {data['frequency']!r} (not numeric)",
+                            "amber")
+                return data
+            else:
+                self.ui.on_log("Metadata script returned no output.", "amber")
         except Exception as e:
             self.ui.on_log(f"Metadata script error: {e}", "red")
         return {}
