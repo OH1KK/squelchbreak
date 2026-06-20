@@ -20,7 +20,10 @@ from .audio_engine import (
     AudioEngine, AudioEngineUI, list_input_devices, resolve_device_index,
     PYAUDIO_OK,
 )
-from .constants import __version__, APP_ID, APP_TITLE, DEFAULT_CONFIG_PATH
+from .constants import (
+    __version__, APP_ID, APP_TITLE, DEFAULT_CONFIG_PATH,
+    HOMEPAGE_URL, ISSUES_URL,
+)
 from .main_page import MainPage
 from .settings_page import SettingsPage
 
@@ -587,7 +590,8 @@ class SquelchbreakApp(Adw.Application):
             comments="VOX-triggered audio recorder for amateur radio "
                      "scanner monitoring. Listens for a signal breaking "
                      "squelch and records it automatically.",
-            website="https://github.com/",
+            website=HOMEPAGE_URL,
+            issue_url=ISSUES_URL,
         )
         about.present()
 
