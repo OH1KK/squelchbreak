@@ -5,8 +5,10 @@ import os
 
 __version__ = "2026.06.21.01"
 
-APP_ID    = "fi.toimii.squelchbreak"
-APP_TITLE = "Squelchbreak"
+APP_ID       = "fi.toimii.squelchbreak"
+APP_TITLE    = "Squelchbreak"
+HOMEPAGE_URL = "https://github.com/OH1KK/squelchbreak"
+ISSUES_URL   = f"{HOMEPAGE_URL}/issues"
 
 # ── Audio parameters ──────────────────────────────────────────────────────────
 RATE         = 44100
