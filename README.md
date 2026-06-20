@@ -12,6 +12,8 @@ configurable threshold), stopping again after a configurable period of
 silence. Each recording is saved as a `.wav` file with a matching
 `.json` metadata sidecar.
 
+[![Squelchbreak main window](screenshots/main-window.png)](screenshots/main-window.png)
+
 See [INSTALL.md](INSTALL.md) for setup instructions.
 
 ## Features
