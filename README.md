@@ -3,8 +3,6 @@
 A VOX-triggered audio recorder for amateur radio and scanner monitoring,
 built with GTK4 + libadwaita for a native GNOME look.
 
-**Homepage / source:** https://github.com/OH1KK/squelchbreak
-
 Squelchbreak listens to an audio input device — typically a scanner or
 transceiver's audio output feeding a USB sound card — and automatically
 starts recording whenever the signal "breaks squelch" (exceeds a
