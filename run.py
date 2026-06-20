@@ -15,6 +15,7 @@ giving each a different --config file:
 
 Copyright (C) 2015-2026 Kari Karvonen <oh1kk@toimii.fi>
 GNU GPL v3 or later.
+Homepage: https://github.com/OH1KK/squelchbreak
 """
 import argparse
 import sys
