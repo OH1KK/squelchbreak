@@ -11,6 +11,7 @@ GTK at all, so it stays testable / portable.
 import json
 import os
 import subprocess
+import threading
 import time
 import uuid
 from array import array
@@ -228,8 +229,11 @@ class AudioEngine:
                     if not self.manual_active and wf is not None:
                         wf.close()
                         wf = None
-                        self._finalise(p, snd_data, wav_filename, rec_start,
-                                       meta=self._get_metadata(settings))
+                        # Async fetch: the stream is still open and PortAudio
+                        # keeps buffering while this runs, so don't block here.
+                        meta_box = self._start_metadata_fetch(settings)
+                        self._finalise_async(p, snd_data, wav_filename,
+                                             rec_start, meta_box)
                         snd_data = array('h')
                         self.ui.on_recording_stopped()
 
@@ -275,7 +279,12 @@ class AudioEngine:
         snd_data = array('h', first_chunk)
         rec_start = last_voice = time.time()
         wav_filename = self._make_filename(settings)
-        meta = self._get_metadata(settings)
+
+        # Kick off the metadata script in the background *before* doing
+        # anything else, so a slow serial/rigctl round-trip never delays
+        # audio capture — the stream keeps being read on this thread
+        # while the script runs concurrently on its own.
+        meta_box = self._start_metadata_fetch(settings)
 
         self.ui.on_recording_started(wav_filename)
         self.ui.on_log(f"Recording: {os.path.basename(wav_filename)}.wav", "amber")
@@ -292,6 +301,10 @@ class AudioEngine:
             if time.time() > last_voice + live_settings["tail_silence"]:
                 break
 
+        # By now the .wav audio is fully captured; waiting here for the
+        # metadata script (if it's somehow still running) no longer
+        # risks losing anything.
+        meta = self._collect_metadata_fetch(meta_box)
         self._finalise(p, snd_data, wav_filename, rec_start, meta)
         self.ui.on_recording_stopped()
 
@@ -308,9 +321,15 @@ class AudioEngine:
 
         wav_path = f"{wav_filename}.wav"
         fmt = getattr(pyaudio, FORMAT_STR)
+        # Sample size is a fixed property of the format (2 bytes for
+        # paInt16), not of a particular open stream — looked up via a
+        # throwaway PyAudio instance so this doesn't depend on the
+        # caller's `p`/stream still being alive (relevant when this runs
+        # on a background thread after the stream may have moved on).
+        sample_width = pyaudio.PyAudio().get_sample_size(fmt)
         with wave.open(wav_path, 'wb') as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(p.get_sample_size(fmt))
+            wf.setsampwidth(sample_width)
             wf.setframerate(RATE)
             wf.writeframes(pack('<' + ('h' * len(snd_data)), *snd_data))
 
@@ -331,6 +350,21 @@ class AudioEngine:
         self.ui.on_log(f"Saved: {os.path.basename(wav_path)} ({duration:.1f}s)", "green")
         self.ui.on_log(f"Meta:  {os.path.basename(json_path)}", "dim")
         self.ui.on_session_saved(wav_path, json_path, duration)
+
+    def _finalise_async(self, p, snd_data, wav_filename, rec_start, meta_box):
+        """
+        Used by manual mode, where the audio stream stays open and
+        actively buffering during finalise. Writes the .wav immediately
+        (cheap, no external dependency), then waits for the metadata
+        script and writes the .json sidecar on a separate thread, so the
+        caller can go straight back to reading the stream instead of
+        blocking on a possibly-slow script.
+        """
+        def _worker():
+            meta = self._collect_metadata_fetch(meta_box)
+            self._finalise(p, snd_data, wav_filename, rec_start, meta)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _make_filename(self, settings):
         prefix = settings.get("filename_prefix") or "voxrecord"
@@ -364,6 +398,41 @@ class AudioEngine:
         except Exception as e:
             self.ui.on_log(f"Metadata script error: {e}", "red")
         return {}
+
+    def _start_metadata_fetch(self, settings):
+        """
+        Run the metadata script in a background thread so a slow script
+        (e.g. a serial round-trip to a radio) never blocks audio capture —
+        PortAudio's input buffer keeps draining on the main recording
+        thread while this runs concurrently.
+
+        Returns a dict with a single key 'result', which the metadata
+        thread fills in once it finishes; safe to read from the main
+        thread without a lock since it's only ever assigned once, after
+        which _finalise() reads it (a join() happens first, see below).
+        """
+        box = {"result": None, "thread": None}
+
+        def _worker():
+            box["result"] = self._get_metadata(settings)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        box["thread"] = t
+        t.start()
+        return box
+
+    @staticmethod
+    def _collect_metadata_fetch(box, timeout=8.0):
+        """
+        Wait for a background metadata fetch (started via
+        _start_metadata_fetch) to complete, with a safety timeout so a
+        runaway script can't hang the recorder forever. Called right
+        before writing the .json sidecar — by then the .wav has already
+        been fully captured and saved, so this wait no longer risks
+        losing any audio.
+        """
+        box["thread"].join(timeout=timeout)
+        return box["result"] if box["result"] is not None else {}
 
     @staticmethod
     def _normalize(snd_data):
