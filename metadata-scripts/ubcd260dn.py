@@ -37,6 +37,12 @@ import serial
 SERIAL_PORT = os.environ.get("UBCD260DN_PORT", "/dev/ttyACM0")
 BAUD_RATE   = 115200
 TIMEOUT_S   = 1.0
+DEBUG       = os.environ.get("UBCD260DN_DEBUG", "") == "1"
+
+
+def _dbg(*args):
+    if DEBUG:
+        print("[debug]", *args, file=sys.stderr)
 
 
 def _open_port():
@@ -62,6 +68,16 @@ def _freq_to_hz(freq_field):
         return None
 
 
+def _looks_like_frequency(field):
+    """True for any field that is just digits, optionally with a decimal
+    point (e.g. '01602500', '0160.2500', '160.25') — these are frequency
+    representations and must never be mistaken for a channel name."""
+    f = (field or "").strip()
+    if not f:
+        return False
+    return bool(re.fullmatch(r"\d+(\.\d+)?", f))
+
+
 def _normalize_mode(mode_field):
     """Map radio MOD field to a Squelchbreak-friendly mode string."""
     m = (mode_field or "").strip().upper()
@@ -84,34 +100,40 @@ def get_current_channel():
 
     try:
         # GLG = current channel info while scanning/holding.
-        # Typical response: GLG,FRQ_TX,FRQ_RX,NAME,FREQ,SQL,MUTE,...
+        # Confirmed real format on this radio:
+        #   GLG,FREQ,MOD,?,?,SCAN_STATE,BANK_NAME,CHANNEL_NAME,?,?,,,?
+        # Example: GLG,0138.5000,FM,0,0,SCAN MODE,Bank 1,Folk vh,1,0,,,NONE
+        #   [0]=GLG [1]=freq [2]=mode [3]=? [4]=? [5]=scan_state
+        #   [6]=bank_name [7]=channel_name [8]=? [9]=? [10]=- [11]=- [12]=?
         resp = _send(ser, "GLG")
+        _dbg("GLG raw:", repr(resp))
         if resp and resp.startswith("GLG") and "," in resp:
             fields = resp.split(",")
-            # NAME is the first alphabetic, non-numeric field after GLG
-            for f in fields[1:]:
-                if f and not re.fullmatch(r"[0-9]+", f) and name is None:
-                    name = f.strip()
-                    break
-            # FREQ is the first 8-digit numeric field
-            for f in fields[1:]:
-                if re.fullmatch(r"\d{8}", f):
-                    freq_hz = _freq_to_hz(f)
-                    break
-            # MOD: look for a recognizable mode token anywhere in the line
-            for f in fields:
-                mm = _normalize_mode(f)
+            _dbg("GLG fields:", fields)
+
+            if len(fields) > 1 and _looks_like_frequency(fields[1]):
+                freq_hz = int(round(float(fields[1].strip()) * 1_000_000))
+                _dbg("GLG freq (field 1):", repr(fields[1]), "->", freq_hz)
+
+            if len(fields) > 2:
+                mm = _normalize_mode(fields[2])
                 if mm:
                     mode = mm
-                    break
+                    _dbg("GLG mode (field 2):", repr(fields[2]), "->", mm)
+
+            if len(fields) > 7 and fields[7].strip():
+                name = fields[7].strip()
+                _dbg("GLG name (field 7):", repr(fields[7]))
 
         # If GLG didn't give a clean result, try the active channel's
         # CIN record directly via STS's reported channel name, or fall
         # back to whatever the radio is displaying.
         if freq_hz is None or mode is None or name is None:
             resp = _send(ser, "STS")
+            _dbg("STS raw:", repr(resp))
             if resp and resp.startswith("STS"):
                 fields = resp.split(",")
+                _dbg("STS fields:", fields)
                 # Look for "CH<num> <freq>" pattern, e.g. "CH108 446.0468"
                 for f in fields:
                     m = re.search(
@@ -120,23 +142,28 @@ def get_current_channel():
                     if m:
                         if freq_hz is None:
                             freq_hz = int(round(float(m.group(2)) * 1_000_000))
+                            _dbg("STS matched freq field:", repr(f), "->", freq_hz)
                         break
-                # Name = first plausible text field (skip icon/bitmap junk)
+                # Name = first plausible text field (skip icon/bitmap junk
+                # and skip anything that's just a frequency rendering)
                 if name is None:
                     for f in fields[2:]:
                         cleaned = f.strip()
-                        if cleaned and re.search(r"[A-Za-z0-9]", cleaned) and \
-                           not re.search(r"CH\s*\d+", cleaned):
+                        if cleaned and re.search(r"[A-Za-z]", cleaned) and \
+                           not re.search(r"CH\s*\d+", cleaned) and \
+                           not _looks_like_frequency(cleaned):
                             name = cleaned
+                            _dbg("STS matched name field:", repr(f))
                             break
                 if mode is None:
                     for f in fields:
                         mm = _normalize_mode(f)
                         if mm:
                             mode = mm
+                            _dbg("STS matched mode field:", repr(f), "->", mm)
                             break
-    except Exception:
-        pass
+    except Exception as e:
+        _dbg("Exception:", repr(e))
     finally:
         ser.close()
 
@@ -156,4 +183,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
