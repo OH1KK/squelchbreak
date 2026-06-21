@@ -106,6 +106,78 @@ Make it executable (`chmod +x`) and select it in Settings. Use the
 **Test script now** button to verify the output without starting a full
 recording.
 
+## Building a .deb package
+
+A Debian/Ubuntu packaging skeleton is included under `deb-pkg/`, so you
+can build an installable `squelchbreak_<version>_all.deb` instead of
+running Squelchbreak from source every time.
+
+```bash
+cd deb-pkg
+./build.sh
+```
+
+`build.sh` copies the current application source (`run.py` and the
+`squelchbreak/` package) from the project root into the packaging
+skeleton, fixes file permissions, and runs `dpkg-deb --build`. The
+finished package appears in `deb-pkg/` as
+`squelchbreak_<version>_all.deb`.
+
+Install it with:
+
+```bash
+sudo dpkg -i squelchbreak_<version>_all.deb
+sudo apt -f install   # only needed if dpkg reports missing dependencies
+```
+
+This installs a `squelchbreak` command on your `PATH`, a GNOME
+application launcher entry, and pulls in the required system
+dependencies (`python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`,
+`python3-pyaudio`) automatically.
+
+### Expected layout
+
+```
+squelchbreak/            ← project root
+├── run.py
+├── squelchbreak/          ← Python package
+└── deb-pkg/                ← packaging skeleton, run build.sh from here
+    ├── build.sh
+    └── squelchbreak/
+        ├── DEBIAN/
+        │   ├── control
+        │   ├── postinst
+        │   └── postrm
+        └── usr/
+            ├── bin/squelchbreak
+            ├── lib/squelchbreak/        (filled in by build.sh)
+            └── share/
+                ├── applications/fi.toimii.squelchbreak.desktop
+                ├── doc/squelchbreak/{copyright,changelog.gz}
+                └── icons/hicolor/scalable/apps/
+```
+
+### Bumping the version
+
+When releasing an updated package, update both of these so they match:
+
+1. `squelchbreak/constants.py` → `__version__`
+2. `deb-pkg/squelchbreak/DEBIAN/control` → `Version:` (format:
+   `<app-version>-<debian-revision>`, e.g. `2026.06.21.01-1`; bump just
+   the `-N` suffix for packaging-only changes that don't touch the app
+   version itself)
+
+It's also good practice to add a new entry to
+`deb-pkg/squelchbreak/usr/share/doc/squelchbreak/changelog.gz` (gunzip,
+edit, re-gzip) describing what changed.
+
+### Checking what's inside a built package
+
+```bash
+dpkg-deb --contents squelchbreak_<version>_all.deb   # list files
+dpkg-deb --info squelchbreak_<version>_all.deb        # metadata/dependencies
+```
+
 ## Issues and contributions
 
 Bug reports, feature requests, and pull requests are welcome at
