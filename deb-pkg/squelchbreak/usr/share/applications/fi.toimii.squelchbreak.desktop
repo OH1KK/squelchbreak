@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Squelchbreak
+GenericName=VOX Audio Recorder
+Comment=VOX-triggered audio recorder for amateur radio and scanner monitoring
+Exec=squelchbreak %U
+Icon=audio-input-microphone-symbolic
+Terminal=false
+Categories=AudioVideo;Audio;HamRadio;
+Keywords=ham radio;scanner;VOX;recording;squelch;amateur radio;
+StartupNotify=true

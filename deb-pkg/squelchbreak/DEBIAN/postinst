@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+# Byte-compile for faster first launch. Failure here should never break
+# the install (compileall returns non-zero on any warning), so we don't
+# let `set -e` propagate past this single best-effort step.
+python3 -m compileall -q /usr/lib/squelchbreak || true
+
+# Refresh the desktop database and icon cache so the new launcher
+# entry shows up immediately in the GNOME app grid without re-login.
+if [ -x /usr/bin/update-desktop-database ]; then
+    update-desktop-database -q /usr/share/applications || true
+fi
+if [ -x /usr/bin/gtk-update-icon-cache ]; then
+    gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+fi
+
+exit 0

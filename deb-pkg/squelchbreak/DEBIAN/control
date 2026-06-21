@@ -1,0 +1,22 @@
+Package: squelchbreak
+Version: 2026.06.21.01-1
+Section: hamradio
+Priority: optional
+Architecture: all
+Maintainer: Kari Karvonen <oh1kk@toimii.fi>
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-pyaudio
+Recommends: portaudio19-dev
+Homepage: https://github.com/OH1KK/squelchbreak
+Description: VOX-triggered audio recorder for amateur radio / scanner use
+ Squelchbreak listens to an audio input device and automatically
+ records whenever the signal "breaks squelch" (exceeds a configurable
+ threshold), stopping again after a period of silence. Designed for
+ amateur radio and scanner monitoring, with a native GNOME (GTK4 +
+ libadwaita) interface.
+ .
+ Features include a VU meter with a visible threshold marker, manual
+ record mode, per-recording JSON metadata sidecars (optionally
+ populated by a user-supplied script querying a radio over serial/
+ rigctl), automatic recovery from a stuck/frozen audio device, and
+ support for running multiple independent instances at once (one per
+ sound card/radio) via per-instance config files.

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Squelchbreak launcher — installed by the squelchbreak .deb package.
+# Runs the application from its installed library location.
+exec python3 /usr/lib/squelchbreak/run.py "$@"
