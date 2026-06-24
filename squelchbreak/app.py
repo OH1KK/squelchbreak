@@ -519,7 +519,17 @@ class SquelchbreakWindow(Adw.ApplicationWindow):
 
 class SquelchbreakApp(Adw.Application):
     def __init__(self, config_path=None):
-        super().__init__(application_id=APP_ID)
+        # NON_UNIQUE is required here: Squelchbreak is designed to run as
+        # several fully independent OS processes at once (one per radio/
+        # sound card, see --config). GLib's default behaviour treats the
+        # application_id as a single-instance lock via D-Bus — launching
+        # a second process would just re-activate the first one's window
+        # instead of starting a new instance. Disabling that is what lets
+        # `squelchbreak --config radio1.json` and
+        # `squelchbreak --config radio2.json` open as two separate
+        # windows/processes rather than one stealing focus from the other.
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.config_path = config_path
         self.window = None
 
