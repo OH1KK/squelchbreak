@@ -245,6 +245,16 @@ class MainPage(Gtk.Box):
             self._log_buffer.insert_with_tags(end_iter, text, tag)
         else:
             self._log_buffer.insert(end_iter, text)
+
+        # Trim the oldest lines when the buffer exceeds the cap so the
+        # log doesn't grow without bound over a multi-day session.
+        MAX_LOG_LINES = 500
+        line_count = self._log_buffer.get_line_count()
+        if line_count > MAX_LOG_LINES:
+            start = self._log_buffer.get_start_iter()
+            trim_end = self._log_buffer.get_iter_at_line(line_count - MAX_LOG_LINES)
+            self._log_buffer.delete(start, trim_end)
+
         # Scroll to bottom
         mark = self._log_buffer.get_insert()
         self.log_view.scroll_mark_onscreen(mark)
