@@ -71,9 +71,14 @@ class EngineUIBridge(AudioEngineUI):
 
     def __init__(self, win):
         self.win = win
+        self._pending_vu = None   # most-recent VU level waiting to be drawn
 
     def on_vu_level(self, level):
-        GLib.idle_add(self.win._apply_vu_level, level)
+        # Don't schedule one idle_add per chunk (43/sec) — just store the
+        # latest level and let the UI timer pick it up at its own pace.
+        # This eliminates the idle_add backlog that builds up during
+        # disk I/O and is the main source of memory pressure under load.
+        self._pending_vu = level
 
     def on_recording_started(self, filename_base):
         GLib.idle_add(self.win._on_recording_started, filename_base)
@@ -113,7 +118,8 @@ class SquelchbreakWindow(Adw.ApplicationWindow):
         self.vox_listening = False
         self.manual_active = False
         self.audio_thread = None
-        self.engine = AudioEngine(EngineUIBridge(self), self._get_engine_settings)
+        self._ui_bridge = EngineUIBridge(self)
+        self.engine = AudioEngine(self._ui_bridge, self._get_engine_settings)
         self._pulse_source_id = None
         self._pulse_bright = True
         self._devices = [("Default input device", -1)]
@@ -122,10 +128,25 @@ class SquelchbreakWindow(Adw.ApplicationWindow):
         self._populate_devices(initial=True)
         self._load_config_into_ui(self.config_path, quiet=True)
         self._update_title()
+        self._start_vu_poll_timer()
 
         if not PYAUDIO_OK:
             self._log("⚠ pyaudio not found. Install: pip install pyaudio", "amber")
         self._log(f"Config file: {self.config_path}", "dim")
+
+    def _start_vu_poll_timer(self):
+        """Poll the bridge's latest VU level at a fixed 40ms rate.
+        This replaces the per-chunk GLib.idle_add approach, which was
+        scheduling ~43 callbacks/second from the audio thread and could
+        build a large backlog during disk I/O, leaking memory over time."""
+        def _tick():
+            level = self._ui_bridge._pending_vu
+            if level is not None:
+                self._ui_bridge._pending_vu = None
+                self._apply_vu_level(level)
+            return True  # keep the timer running
+
+        GLib.timeout_add(40, _tick)
 
     # ── UI construction ─────────────────────────────────────────────────────────
 
