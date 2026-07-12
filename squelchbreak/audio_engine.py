@@ -321,17 +321,18 @@ class AudioEngine:
 
         wav_path = f"{wav_filename}.wav"
         fmt = getattr(pyaudio, FORMAT_STR)
-        # Sample size is a fixed property of the format (2 bytes for
-        # paInt16), not of a particular open stream — looked up via a
-        # throwaway PyAudio instance so this doesn't depend on the
-        # caller's `p`/stream still being alive (relevant when this runs
-        # on a background thread after the stream may have moved on).
         sample_width = pyaudio.PyAudio().get_sample_size(fmt)
         with wave.open(wav_path, 'wb') as wf:
             wf.setnchannels(1)
             wf.setsampwidth(sample_width)
             wf.setframerate(RATE)
             wf.writeframes(pack('<' + ('h' * len(snd_data)), *snd_data))
+
+        # Explicitly release the audio buffer now that it's written to
+        # disk — a long recording can be tens of MB and Python's GC
+        # won't necessarily collect it promptly otherwise, which matters
+        # when sessions run back-to-back over days.
+        del snd_data
 
         duration = time.time() - rec_start
         meta = dict(meta or {})
