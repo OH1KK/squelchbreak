@@ -377,9 +377,29 @@ class AudioEngine:
         script = (settings.get("meta_script") or "").strip()
         if not script:
             return {}
+        proc = None
         try:
-            result = subprocess.run([script], capture_output=True, text=True, timeout=5)
-            raw = result.stdout.strip()
+            proc = subprocess.Popen(
+                [script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                stdout, _ = proc.communicate(timeout=5)
+                raw = stdout.decode("utf-8", errors="replace").strip()
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()   # drain pipes so nothing leaks
+                self.ui.on_log("Metadata script timed out (>5s).", "amber")
+                return {}
+            finally:
+                # Ensure the process is fully reaped and pipes are closed
+                # regardless of how communicate() exited.
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+
             if raw:
                 data = json.loads(raw)
                 self.ui.on_log(f"Metadata: {json.dumps(data)}", "dim")
@@ -398,6 +418,12 @@ class AudioEngine:
                 self.ui.on_log("Metadata script returned no output.", "amber")
         except Exception as e:
             self.ui.on_log(f"Metadata script error: {e}", "red")
+            if proc is not None:
+                try:
+                    proc.kill()
+                    proc.communicate()
+                except Exception:
+                    pass
         return {}
 
     def _start_metadata_fetch(self, settings):
