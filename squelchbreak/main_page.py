@@ -251,9 +251,17 @@ class MainPage(Gtk.Box):
         MAX_LOG_LINES = 500
         line_count = self._log_buffer.get_line_count()
         if line_count > MAX_LOG_LINES:
-            start = self._log_buffer.get_start_iter()
-            trim_end = self._log_buffer.get_iter_at_line(line_count - MAX_LOG_LINES)
-            self._log_buffer.delete(start, trim_end)
+            try:
+                start = self._log_buffer.get_start_iter()
+                # In modern PyGObject (GTK4 bindings), get_iter_at_line()
+                # returns a (success: bool, iter: Gtk.TextIter) tuple rather
+                # than a bare Gtk.TextIter — unpack accordingly.
+                result = self._log_buffer.get_iter_at_line(
+                    line_count - MAX_LOG_LINES)
+                trim_end = result[1] if isinstance(result, tuple) else result
+                self._log_buffer.delete(start, trim_end)
+            except Exception:
+                pass  # never let a trim failure crash the logging path
 
         # Scroll to bottom
         mark = self._log_buffer.get_insert()
