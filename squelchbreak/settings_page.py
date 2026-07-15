@@ -4,10 +4,77 @@ Squelchbreak — settings page.
 Built with Adw.PreferencesPage / Adw.PreferencesGroup / Adw.*Row for the
 native GNOME "Settings app" look: grouped cards, switches, entry rows.
 """
+import re
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Pango
+
+
+def _pretty_device_name(raw_name):
+    """
+    Convert a raw ALSA/PulseAudio device name into a readable label.
+
+    Examples:
+      "[20] alsa_input.usb-C-Media_Electronics_Inc._USB_PnP_Sound_Device-00.analog-mono"
+      → "[20] Media Electronics Inc. USB PnP Sound Device (analog-mono)"
+
+      "[1] alsa_input.usb-Generic_USB_Audio-00.analog-stereo"
+      → "[1] Generic USB Audio (analog-stereo)"
+
+      "[0] alsa_input.pci-0000_00_1f.3.analog-stereo"
+      → "[0] PCI Audio (analog-stereo)"
+
+      "Default input device" / "[2] Built-in Audio Analog Stereo"
+      → unchanged
+    """
+    if raw_name == "Default input device":
+        return raw_name
+
+    m = re.match(r'^(\[\d+\])\s*(.*)', raw_name)
+    if not m:
+        return raw_name
+    index_prefix = m.group(1)
+    rest = m.group(2)
+
+    if not re.search(r'alsa_(?:input|output)\.', rest):
+        # Already a clean human-readable name — return as-is
+        return f"{index_prefix} {rest}"
+
+    # Strip alsa_input./alsa_output. prefix
+    rest = re.sub(r'^alsa_(?:input|output)\.', '', rest)
+
+    # PCI devices: address is meaningless to the user, just say "PCI Audio"
+    if rest.startswith('pci-'):
+        suffix_m = re.search(r'\.([a-z][a-z0-9\-]*)$', rest)
+        suffix = suffix_m.group(1) if suffix_m else ''
+        label = f"PCI Audio ({suffix})" if suffix else "PCI Audio"
+        return f"{index_prefix} {label}"
+
+    # USB / other devices
+    suffix_m = re.search(r'\.([a-z][a-z0-9\-]*)$', rest)
+    suffix = suffix_m.group(1) if suffix_m else ''
+    if suffix_m:
+        rest = rest[:suffix_m.start()]
+    # Strip leading bus type prefix: "usb-", "hdaudio-", "bluez-"
+    rest = re.sub(r'^(?:usb|hdaudio|bluez)-', '', rest)
+    # Extract trailing USB address "-00", "-01" etc. — keep it as a port
+    # hint so identical cards can be told apart (e.g. "port 01")
+    addr_m = re.search(r'-(\d{2})$', rest)
+    port_hint = f"port {addr_m.group(1)}" if addr_m else ''
+    if addr_m:
+        rest = rest[:addr_m.start()]
+    # Replace underscores and hyphens with spaces, collapse runs
+    rest = re.sub(r' +', ' ', rest.replace('_', ' ').replace('-', ' ')).strip()
+    # Strip leading single-letter fragment left by e.g. "C-Media" → "C " → drop
+    rest = re.sub(r'^[A-Za-z] ', '', rest)
+    # Build suffix: "analog-mono · port 01" or just "analog-mono"
+    parts = [s for s in [suffix, port_hint] if s]
+    if parts:
+        rest = f"{rest} ({', '.join(parts)})"
+
+    return f"{index_prefix} {rest}"
 
 
 class SettingsPage(Adw.PreferencesPage):
@@ -28,7 +95,8 @@ class SettingsPage(Adw.PreferencesPage):
         self.on_create_dir_clicked = lambda: None
         self.on_refresh_devices_clicked = lambda: None
 
-        self._device_names = ["Default input device"]
+        self._device_names = ["Default input device"]   # raw names (saved to config)
+        self._display_names = ["Default input device"]  # cleaned names (shown in UI)
         self._suppress_device_callback = False
 
         self._build_device_group()
@@ -44,17 +112,22 @@ class SettingsPage(Adw.PreferencesPage):
 
         self.device_row = Adw.ComboRow(title="Sound card",
                                         subtitle="Default input device")
-        self._device_model = Gtk.StringList.new(self._device_names)
+        self._device_model = Gtk.StringList.new(self._display_names)
         self.device_row.set_model(self._device_model)
 
-        # Custom factory so device names are never truncated with an
-        # ellipsis — important when several USB sound cards have long,
-        # similar-looking names that only differ near the end.
-        factory = Gtk.SignalListItemFactory()
-        factory.connect("setup", self._on_factory_setup)
-        factory.connect("bind", self._on_factory_bind)
-        self.device_row.set_factory(factory)
-        self.device_row.set_list_factory(factory)
+        # List factory: shown in the open dropdown popup — no wrapping,
+        # single line with end-ellipsis so the popup stays a sane height.
+        list_factory = Gtk.SignalListItemFactory()
+        list_factory.connect("setup", self._on_list_factory_setup)
+        list_factory.connect("bind", self._on_factory_bind)
+        self.device_row.set_list_factory(list_factory)
+
+        # Selected factory: shown in the collapsed ComboRow — also single
+        # line, end-ellipsis, but slightly smaller to fit the row height.
+        sel_factory = Gtk.SignalListItemFactory()
+        sel_factory.connect("setup", self._on_selected_factory_setup)
+        sel_factory.connect("bind", self._on_factory_bind)
+        self.device_row.set_factory(sel_factory)
 
         self.device_row.connect("notify::selected", self._on_device_selected)
         group.add(self.device_row)
@@ -69,16 +142,25 @@ class SettingsPage(Adw.PreferencesPage):
         group.add(refresh_row)
 
     @staticmethod
-    def _on_factory_setup(factory, list_item):
+    def _on_list_factory_setup(factory, list_item):
+        """Label for items inside the open dropdown popup."""
         label = Gtk.Label(xalign=0)
-        label.set_wrap(True)
-        label.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        label.set_ellipsize(Pango.EllipsizeMode.NONE)
+        label.set_wrap(False)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
         label.set_max_width_chars(60)
-        label.set_margin_top(4)
-        label.set_margin_bottom(4)
+        label.set_margin_top(6)
+        label.set_margin_bottom(6)
         label.set_margin_start(6)
         label.set_margin_end(6)
+        list_item.set_child(label)
+
+    @staticmethod
+    def _on_selected_factory_setup(factory, list_item):
+        """Label shown in the collapsed ComboRow when a device is chosen."""
+        label = Gtk.Label(xalign=0)
+        label.set_wrap(False)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_max_width_chars(50)
         list_item.set_child(label)
 
     @staticmethod
@@ -92,25 +174,30 @@ class SettingsPage(Adw.PreferencesPage):
             return
         idx = row.get_selected()
         if 0 <= idx < len(self._device_names):
-            name = self._device_names[idx]
-            row.set_subtitle(name)
-            self.on_device_changed(name)
+            raw_name = self._device_names[idx]
+            display_name = self._display_names[idx]
+            row.set_subtitle(display_name)
+            self.on_device_changed(raw_name)   # always report raw name for config
 
     def set_device_list(self, names, selected_name=None):
-        """Repopulate the dropdown; preserves selection by name if possible."""
+        """Repopulate the dropdown; preserves selection by name if possible.
+        `names` is a list of raw device name strings; display names are
+        computed automatically."""
         self._suppress_device_callback = True
         self._device_names = names
-        self._device_model = Gtk.StringList.new(names)
+        self._display_names = [_pretty_device_name(n) for n in names]
+        self._device_model = Gtk.StringList.new(self._display_names)
         self.device_row.set_model(self._device_model)
         if selected_name and selected_name in names:
             idx = names.index(selected_name)
         else:
             idx = 0
         self.device_row.set_selected(idx)
-        self.device_row.set_subtitle(names[idx])
+        self.device_row.set_subtitle(self._display_names[idx])
         self._suppress_device_callback = False
 
     def get_selected_device_name(self):
+        """Return the raw device name (for saving to config)."""
         idx = self.device_row.get_selected()
         if 0 <= idx < len(self._device_names):
             return self._device_names[idx]
