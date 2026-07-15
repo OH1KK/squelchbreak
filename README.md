@@ -106,7 +106,7 @@ Make it executable (`chmod +x`) and select it in Settings. Use the
 **Test script now** button to verify the output without starting a full
 recording.
 
-## Toosl and metadata script
+## Tools and metadata script
 
 metadata-scripts/ubcd260dn.py - Get metatadata on Uniden UBCD260DN scanner
 tools/voxrecords-organizer.py - sorts Squelchbreak recordings into subdirectories by date and frequency.
